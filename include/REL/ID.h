@@ -253,7 +253,11 @@ namespace REL
             {
                 std::int32_t format{};
                 a_in.readin(format);
-                if (format != a_formatVersion) {
+                _format = format;
+
+                const bool isValidAEFormat = (a_formatVersion == 2 && format == 5);
+
+                if (format != a_formatVersion && !isValidAEFormat) {
                     stl::report_and_fail(
                             std::format(
                                     "Unsupported address library format: {}\n"
@@ -264,13 +268,24 @@ namespace REL
                 }
 
                 std::int32_t version[4]{};
-                std::int32_t nameLen{};
                 a_in.readin(version);
-                a_in.readin(nameLen);
-                a_in.ignore(nameLen);
 
-                a_in.readin(_pointerSize);
-                a_in.readin(_addressCount);
+                if (format == 5)
+                {
+                    a_in.ignore(64);
+                    a_in.readin(_pointerSize);
+                    std::int32_t dataFormat{0};
+                    a_in.readin(dataFormat);
+                    a_in.readin(_addressCount);
+                }
+                else
+                {
+                    std::int32_t nameLen{};
+                    a_in.readin(nameLen);
+                    a_in.ignore(nameLen);
+                    a_in.readin(_pointerSize);
+                    a_in.readin(_addressCount);
+                }
 
                 for (std::size_t i = 0; i < std::extent_v<decltype(version)>; ++i) {
                     _version[i] = static_cast<std::uint16_t>(version[i]);
@@ -283,10 +298,13 @@ namespace REL
 
             [[nodiscard]] Version version() const noexcept { return _version; }
 
+            [[nodiscard]] std::int32_t format() const noexcept { return _format; }
+
         private:
             Version      _version;
             std::int32_t _pointerSize{0};
             std::int32_t _addressCount{0};
+            std::int32_t _format{2};
         };
 
         IDDatabase() = default;
@@ -330,6 +348,18 @@ namespace REL
 
         bool unpack_file(istream_t &a_in, header_t a_header, bool a_failOnError)
         {
+            if (a_header.format() == 5)
+            {
+              for (std::uint64_t id = 0; id < _id2offset.size(); ++id)
+              {
+                std::uint32_t offset = 0;
+                a_in.readin(offset);
+                _id2offset[id] = { id, static_cast<std::uint64_t>(offset) };
+              }
+
+              return true;
+            }
+
             std::uint8_t type = 0;
             std::uint64_t id = 0;
             std::uint64_t offset = 0;
